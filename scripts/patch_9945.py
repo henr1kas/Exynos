@@ -35,27 +35,6 @@ def find_pattern(data, pattern_str, offset = 0):
         return match.start() + offset
     return None
 
-def patch_check_signature(data): # # required because PIT will not load on USB boot with custom st2 key
-    ret0 = [
-        0xD2800000,
-        0xD65F03C0,
-    ]
-    write_words(data, 0x66A08, ret0)
-
-def patch_prevent_warranty_fuse(data):
-    ret0 = [
-        0xD2800000,
-        0xD65F03C0,
-    ]
-    write_words(data, 0x61CF0, ret0) # set_warranty_void_bit_reason
-    
-    # NOP inlined set_warranty_void_bit_reason
-    NOP = 0xD503201F
-    for off in (0x632A4, 0x632A8, 0x632AC):
-        write_u32(data, off, NOP)
-
-    write_words(data, 0x64640, ret0) # set_warrant_bit
-
 def get_efuse_data():
     import hmac
     from sign import load_private_key, pubkey_blob
@@ -68,40 +47,32 @@ def get_efuse_data():
     public_blob = pubkey_blob(key.public_key(), 4)
     return bytes(a ^ b for a, b in zip(hmac.digest(hmac_key, public_blob[:136], "sha512")[:32], hmac_key))
 
-def patch_go_upload(data):
-    ret1 = [
-        0xD2800020,
-        0xD65F03C0,
-    ]
-    write_words(data, 0x72AE0, ret1)
-
 def patch_fuse_boot_key(data):
-    check_signature = 0x66A08 # use this as dummy func
+    check_signature = 0x91D14 # use this as dummy func
     payload = [
         0xA9BF7BFD,
         0x100000E0,
         0x52800401,
-        jump_to_func_from(check_signature + 12, 0xB4A8),
-        jump_to_func_from(check_signature + 16, 0xB818),
+        jump_to_func_from(check_signature + 12, 0x23DB0),
+        jump_to_func_from(check_signature + 16, 0x24200),
         0xD2800000,
         0xA8C17BFD,
         0xD65F03C0,
     ]
     
-    write_u32(data, 0xB588, 0xD28002C1) # write key2
-    write_u32(data, 0xB834, 0xD28002E1) # write use key2
+    write_u32(data, 0x23EF4, 0x528002C1) # write key2
+    write_u32(data, 0x24228, 0x528002E1) # write use key2
     
     payload.extend(struct.unpack("<8I", get_efuse_data()))
     write_words(data, check_signature, payload)
+    payload_bytes = struct.pack("<{}I".format(len(payload)), *payload)
+    print(payload_bytes)
 
 if __name__ == "__main__":
     with open(sys.argv[1], "rb") as f:
         data = bytearray(f.read())
 
-    patch_check_signature(data)
-    patch_prevent_warranty_fuse(data)
-    #patch_fuse_boot_key(data)
-    #patch_go_upload(data)
+    patch_fuse_boot_key(data)
 
     with open(sys.argv[1], "wb") as f:
         f.write(data)

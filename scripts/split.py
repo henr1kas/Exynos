@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import (
 )
 from cryptography.hazmat.primitives import hashes
 
+#TODO: use frmo sbl1.py
 class SBL1V5Footer(ctypes.LittleEndianStructure):
     _pack_ = 1
     _fields_ = [
@@ -94,26 +95,6 @@ def load_sbl1_footer(data):
 
 def u32(data, off):
     return struct.unpack_from("<I", data, off)[0]
-
-# TODO: 8825 support(no hostbl)
-def split_fld(data, outdir):
-    path = os.path.join(outdir, "fld")
-    os.makedirs(path, exist_ok=True)
-    sbl1_size = 512 * u32(data, 0)
-    dbgc_size = u32(data, sbl1_size) - 1024
-    host_off = sbl1_size + dbgc_size
-    signer = data.find(b"SignerVer0", host_off)
-    binarytag_off = signer - 32
-    with open(os.path.join(path, "strong_soc_bl1.bin"), "wb") as f:
-        f.write(data[:sbl1_size])
-    with open(os.path.join(path, "dbgc.bin"), "wb") as f:
-        f.write(data[sbl1_size:sbl1_size + dbgc_size])
-    with open(os.path.join(path, "hostbl1.bin"), "wb") as f:
-        f.write(data[host_off:binarytag_off])
-    with open(os.path.join(path, "binarytag.bin"), "wb") as f:
-        f.write(data[binarytag_off:signer])
-    with open(os.path.join(path, "signer.bin"), "wb") as f:
-        f.write(data[signer:])
 
 def get_target_boundary(data):
     if len(data) >= 0x40:
@@ -206,21 +187,18 @@ def load_public_key(pubkey_blob, is_v5):
         return load_public_key_p348(pubkey_blob)
     return load_public_key_rsa(pubkey_blob)
 
-custom_names = []
-
-def get_output_name(index, is_pad=False):
+def get_output_name(index, is_pad=False, custom_names=()):
     if index < len(custom_names):
         return custom_names[index]
     return f"{index}_pad.bin" if is_pad else f"{index}.bin"
 
-def split_file_by_sigs(output_dir, data, sigs, pub_keys, is_v5, step_size):
+def find_blocks_by_sigs(data, sigs, pub_keys, is_v5, step_size):
     if is_v5:
         sig_size = 0x210
     else:
         sig_size = 0x110
-    os.makedirs(output_dir, exist_ok=True)
+
     last_end = 0
-    file_idx = 0
     blocks = []
     failed = []
     for offset, var in sigs:
@@ -243,43 +221,59 @@ def split_file_by_sigs(output_dir, data, sigs, pub_keys, is_v5, step_size):
             failed.append((offset, var))
             continue
         if verified_start > last_end:
-            pad_path = os.path.join(output_dir, get_output_name(file_idx, True))
-            with open(pad_path, "wb") as f:
-                f.write(data[last_end:verified_start])
-            print(f"{pad_path}: {hex(verified_start - last_end)} bytes")
-            blocks.append((last_end, verified_start, pad_path))
-            file_idx += 1
-        path = get_output_name(file_idx, False)
-        part_path = os.path.join(output_dir, path)
-        with open(part_path, "wb") as f:
-            f.write(data[verified_start:end])
-        print(f"was cleared {digest_cleared}, index: {var}")
-        print(f"{part_path}: {hex(end - verified_start)} bytes")
-        blocks.append((verified_start, end, part_path))
-        file_idx += 1
+            blocks.append((last_end, verified_start, True, False, None))
+        blocks.append((verified_start, end, False, digest_cleared, var))
         last_end = end
     if last_end < len(data):
-        pad_path = os.path.join(output_dir, get_output_name(file_idx, True))
-        with open(pad_path, "wb") as f:
-            f.write(data[last_end:])
-        print(f"{pad_path}: {hex(len(data) - last_end)} bytes")
-        blocks.append((last_end, len(data), part_path))
-        file_idx += 1
-    for s, e, p in blocks:
-        sigs_block = []
-        for offset, var in failed[:]:
-            if offset >= s and offset <= e:
-                sigs_block.append((offset-s, var))
-                failed.remove((offset, var))
-        if len(sigs_block) > 0:
-            split_file_by_sigs(p.split(".")[0], data[s:e], sigs_block, pub_keys, is_v5, 0x8)
-    for offset, var in failed:
-        print(f"{output_dir}: failed to find start for {offset+sig_size}")
+        blocks.append((last_end, len(data), True, False, None))
+
+    return blocks, failed
+
+def split_file_by_sigs(
+    output_dir,
+    data,
+    sigs,
+    pub_keys,
+    is_v5,
+    step_size,
+    custom_names=(),
+):
+    blocks, failed = find_blocks_by_sigs(
+        data, sigs, pub_keys, is_v5, step_size
+    )
+
+    expected_count = len(custom_names)
+    if failed and expected_count and len(blocks) < expected_count and step_size > 0x8:
+        fine_blocks, fine_failed = find_blocks_by_sigs(
+            data, sigs, pub_keys, is_v5, 0x8
+        )
+        if abs(len(fine_blocks) - expected_count) < abs(len(blocks) - expected_count):
+            blocks = fine_blocks
+            failed = fine_failed
+
+    os.makedirs(output_dir, exist_ok=True)
+    for file_idx, (start, end, is_pad, digest_cleared, var) in enumerate(blocks):
+        path = os.path.join(
+            output_dir,
+            get_output_name(file_idx, is_pad, custom_names),
+        )
+        with open(path, "wb") as f:
+            f.write(data[start:end])
+        if not is_pad:
+            print(f"was cleared {digest_cleared}, index: {var}")
+        print(f"{path}: {hex(end - start)} bytes")
+
+    if expected_count and len(blocks) != expected_count:
+        print(
+            f"{output_dir}: expected {expected_count} parts, "
+            f"but found {len(blocks)}"
+        )
+        sig_size = 0x210 if is_v5 else 0x110
+        for offset, _ in failed:
+            print(f"{output_dir}: failed to find start for {offset + sig_size}")
 
 # todo: i dont remember if works v4
 def split_file_wrapper(data, sboot_split_names, output_dir, footer):
-    global custom_names
-    custom_names = sboot_split_names
     if footer.codesigner_version == 5:
         pub_keys = [load_public_key(footer.st2_key_tee, footer.codesigner_version == 5), load_public_key(footer.st2_key_ree, footer.codesigner_version == 5)]
     else:
@@ -295,7 +289,32 @@ def split_file_wrapper(data, sboot_split_names, output_dir, footer):
         sig_meme = sboot[offset_sig_meme : offset_sig_meme + 16].tobytes()
     
     sigs = find_st2(sboot, offset_sig_meme, sig_meme, footer.codesigner_version == 5)
-    split_file_by_sigs(output_dir, sboot, sigs, pub_keys, footer.codesigner_version == 5, 0x1000)
+    split_file_by_sigs(
+        output_dir,
+        sboot,
+        sigs,
+        pub_keys,
+        footer.codesigner_version == 5,
+        0x1000,
+        sboot_split_names,
+    )
+
+def process_image(img, indir, outdir, footer):
+    img_path = os.path.join(indir, img.name)
+    if not getattr(img, "split", None):
+        shutil.copy(img_path, os.path.join(outdir, img.name))
+        return
+
+    with open(img_path, "rb") as fp:
+        data = fp.read()
+
+    out_dir = os.path.join(outdir, os.path.splitext(img.name)[0])
+    os.makedirs(out_dir, exist_ok=True)
+    split_file_wrapper(data, [i.name for i in img.split], out_dir, footer)
+
+    for child in img.split:
+        if getattr(child, "split", None):
+            process_image(child, out_dir, out_dir, footer)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Samsung Exynos bootloader splitter")
@@ -322,7 +341,6 @@ if __name__ == "__main__":
         with open(fld_path, "rb") as f:
             fld = f.read()
         footer = load_sbl1_footer(fld)
-        split_fld(fld, outdir)
     else:
         footer = load_sbl1_footer(sboot)
 
@@ -330,11 +348,4 @@ if __name__ == "__main__":
         if not isinstance(value, tuple):
             continue
         for img in value:
-            img_path = os.path.join(indir, img.name)
-            if not getattr(img, "split", None):
-                shutil.copy(img_path, os.path.join(outdir, img.name))
-                continue
-            with open(img_path, "rb") as fp:
-                data = fp.read()
-            out_dir = os.path.join(outdir, os.path.splitext(img.name)[0])
-            split_file_wrapper(data, [i.name for i in img.split], out_dir, footer)
+            process_image(img, indir, outdir, footer)

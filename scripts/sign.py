@@ -65,9 +65,9 @@ def header_digest(data, sign_type):
 
 def sign_st1(data, sign_type, st1_privatekey, st2_privatekeys, hmac_key, rb_count, json_path):
     if sign_type == 0:
-        sbl1 = SBL1RSA.from_buffer(data)
+        sbl1 = SBL1RSA(len(data)).from_buffer(data)
     else:
-        sbl1 = SBL1ECDSA.from_buffer(data)
+        sbl1 = SBL1ECDSA(len(data)).from_buffer(data)
     if json_path is not None:
         with open(json_path) as f:
             j = json.load(f)
@@ -86,10 +86,10 @@ def sign_st1(data, sign_type, st1_privatekey, st2_privatekeys, hmac_key, rb_coun
     sbl1.st1_publickey[:] = st1_publickey
     if sign_type == 0:
         sbl1.hmac[:] = hmac.digest(hmac_key, st1_publickey, hashlib.sha256)
-        sbl1.signature[:] = sign_pss(st1_privatekey, memoryview(data)[:SBL1RSA.st1_publickey.offset])
+        sbl1.signature[:] = sign_pss(st1_privatekey, memoryview(data)[:SBL1RSA(len(data)).st1_publickey.offset])
     else:
         sbl1.hmac[:] = hmac.digest(hmac_key, st1_publickey[:136], hashlib.sha512)[:32]
-        sbl1.signature[:] = sign_ecdsa_p384(st1_privatekey, hashlib.sha512(memoryview(data)[:SBL1ECDSA.signature.offset]).digest())
+        sbl1.signature[:] = sign_ecdsa_p384(st1_privatekey, hashlib.sha512(memoryview(data)[:SBL1ECDSA(len(data)).signature.offset]).digest())
     sbl1.checksum = int.from_bytes(header_digest(data, sign_type), "little")
     return data
 

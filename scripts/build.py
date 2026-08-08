@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
+import importlib
 import os
 import subprocess
 import sys
-import importlib
 
-soc_name = sys.argv[1]
-keys_path = sys.argv[2]
-work_dir = sys.argv[3]
-rb_count = sys.argv[4] if len(sys.argv) > 4 else None
 
-soc_module = importlib.import_module(soc_name)
-soc = soc_module.soc_data()
+def sign(
+    image_path,
+    stage,
+    update_header=False,
+    ree=False,
+    sbl1_json=None,
+    signing_type=0,
+    avb_name="",
+    avb_size=0,
+    keys_path=None,
+    rb_count=None,
+):
+    if keys_path is None:
+        raise ValueError("keys_path is required")
 
-def sign(image_path, stage, update_header=False, ree=False, sbl1_json=None, signing_type=0, avb_name="", avb_size=0):
     cmd = [sys.executable, "scripts/sign.py", image_path, keys_path, stage]
-    if stage == "st1":
-        if os.path.exists(sbl1_json):
-            cmd += ["--sbl1-json", sbl1_json]
+    if stage == "st1" and sbl1_json and os.path.exists(sbl1_json):
+        cmd += ["--sbl1-json", sbl1_json]
     if update_header:
         cmd.append("--update-header")
     if ree:
@@ -28,45 +34,87 @@ def sign(image_path, stage, update_header=False, ree=False, sbl1_json=None, sign
     cmd += ["--avb-partition-size", str(avb_size)]
     subprocess.run(cmd, check=True)
 
+
 def merge(paths, out_path):
-    out = bytearray()
-    for path in paths:
-        with open(path, "rb") as f:
-            out.extend(f.read())
     with open(out_path, "wb") as f:
-        f.write(out)
+        for path in paths:
+            with open(path, "rb") as part:
+                while chunk := part.read(1024 * 1024):
+                    f.write(chunk)
 
-for image in soc.odin:
-    if image.split:
-        subdir = os.path.join(work_dir, os.path.splitext(image.name)[0])
-        sbl1_json = os.path.join(subdir, "sbl1.json")
 
-        for inner in image.split:
-            if inner.stage is None:
-                continue
-            sign(
-                os.path.join(subdir, inner.name),
-                stage=inner.stage,
-                update_header=inner.update_header,
-                ree=inner.ree,
-                avb_name=inner.avb,
-                avb_size=inner.size,
-                sbl1_json=sbl1_json,
-                signing_type=soc.signing_type
+def build_image(
+    image,
+    parent_dir,
+    keys_path,
+    signing_type,
+    rb_count=None,
+    sbl1_json=None,
+):
+    """Build and sign one image after recursively building its children."""
+    image_path = os.path.join(parent_dir, image.name)
+
+    if getattr(image, "split", None):
+        parts_dir = os.path.join(parent_dir, os.path.splitext(image.name)[0])
+        child_sbl1_json = os.path.join(parts_dir, "sbl1.json")
+
+        for child in image.split:
+            build_image(
+                child,
+                parts_dir,
+                keys_path,
+                signing_type,
+                rb_count=rb_count,
+                sbl1_json=child_sbl1_json,
             )
 
         merge(
-            [os.path.join(subdir, inner.name) for inner in image.split],
-            os.path.join(work_dir, image.name),
+            [os.path.join(parts_dir, child.name) for child in image.split],
+            image_path,
         )
 
     if image.stage is not None:
         sign(
-            os.path.join(work_dir, image.name),
+            image_path,
             stage=image.stage,
             update_header=image.update_header,
             ree=image.ree,
+            sbl1_json=sbl1_json,
             avb_name=image.avb,
             avb_size=image.size,
-            signing_type=soc.signing_type
+            signing_type=signing_type,
+            keys_path=keys_path,
+            rb_count=rb_count,
         )
+
+
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+    if len(argv) not in (3, 4):
+        print(
+            "usage: build.py SOC KEYS_PATH WORK_DIR [RB_COUNT]",
+            file=sys.stderr,
+        )
+        return 2
+
+    soc_name, keys_path, work_dir = argv[:3]
+    rb_count = argv[3] if len(argv) == 4 else None
+    soc_module = importlib.import_module(soc_name)
+    soc = soc_module.soc_data()
+
+    os.makedirs(work_dir, exist_ok=True)
+    for image in soc.odin:
+        build_image(
+            image,
+            work_dir,
+            keys_path,
+            soc.signing_type,
+            rb_count=rb_count,
+        )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

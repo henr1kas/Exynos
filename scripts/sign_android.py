@@ -4,8 +4,29 @@ import sys
 import hashlib
 import os
 from struct import unpack
-from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives.asymmetric import padding, ec
+from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+from cryptography.hazmat.primitives.asymmetric import utils
 from cryptography.hazmat.primitives import hashes, serialization
+
+SIGNER_VER_03 = bytes.fromhex("53 69 67 6E 65 72 56 65 72 30 33")
+def is_ecdsa_signer(data):
+    marker = bytes(data[0x328:0x328 + len(SIGNER_VER_03)])
+    return marker in SIGNER_VER_03
+
+def download_final_digest(data, header):
+    payload_digest = hashlib.sha256(bytes(data[0x328:])).digest()
+    return payload_digest, hashlib.sha512(payload_digest + header).digest()
+
+def generate_padded_signature(r, s):
+    r_padded = b"\x00" * 20 + r.to_bytes(48, byteorder="big")
+    s_padded = b"\x00" * 20 + s.to_bytes(48, byteorder="big")
+    return r_padded + s_padded
+
+def sign_digest(priv_key, digest):
+    signature = priv_key.sign(digest, ec.ECDSA(utils.Prehashed(hashes.SHA512())))
+    r, s = decode_dss_signature(signature)
+    return generate_padded_signature(r, s)
 
 def sign(msg, priv_key):
     return priv_key.sign(
@@ -81,6 +102,7 @@ def main():
     is_bootimg = data[:8] == b'ANDROID!'
     did_expand = False
     signer_info_added = False
+    needs_reverse = True
 
     if is_sparse:
         print("sparse detected!")
@@ -92,8 +114,20 @@ def main():
             signer_info_if_null[0x9C:0x9C+0x64] = filename.encode().ljust(0x64, b"\x00")
             signer_info_added = True
             data[0x328:0x428] = signer_info_if_null[:0x100]
-        msg = hashlib.sha256(data[0x328:]).digest()
-        sig = sign(msg, priv_key)
+
+        if is_ecdsa_signer(data):
+            print("ECDSA detected!")
+
+            payload_digest = hashlib.sha512(bytes(data[0x328:])).digest()
+            digest = hashlib.sha512(
+                payload_digest + bytes(data[0x28:0x38])
+            ).digest()
+
+            sig = sign_digest(priv_key, digest)
+            needs_reverse = False
+        else:
+            msg = hashlib.sha256(data[0x328:]).digest()
+            sig = sign(msg, priv_key)
     else:
         no_signer = has_no_signer(data[-0x210:-0x206])
         if no_signer or len(sys.argv) == 4:
@@ -122,10 +156,13 @@ def main():
                 if signer_info_added:
                     f.seek(0x328)
                     f.write(data[0x328:0x428])
-                f.seek(0x28)
+                if needs_reverse:
+                    f.seek(0x28)
+                else:
+                    f.seek(0x38)
             else:
                 f.seek(-0x100, 2)
-            f.write(sig[::-1])
+            f.write(sig[::-1] if needs_reverse else sig)
     else:
         with open(filename, "wb") as f:
             f.write(data)
