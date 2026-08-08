@@ -8,6 +8,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, ec
 from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.asymmetric import utils
 from cryptography.hazmat.primitives import hashes, serialization
+import mmap
 
 SIGNER_VER_03 = bytes.fromhex("53 69 67 6E 65 72 56 65 72 30 33")
 def is_ecdsa_signer(data):
@@ -94,9 +95,8 @@ def main():
             password=None,
         )
 
-    with open(filename, "rb") as f:
-        data = bytearray(os.fstat(f.fileno()).st_size)
-        f.readinto(data)
+    file_handle = open(filename, "r+b")
+    data = mmap.mmap(file_handle.fileno(), 0)
 
     is_sparse = data[:4] == b'\x3a\xff\x26\xed'
     is_bootimg = data[:8] == b'ANDROID!'
@@ -118,15 +118,21 @@ def main():
         if is_ecdsa_signer(data):
             print("ECDSA detected!")
 
-            payload_digest = hashlib.sha512(bytes(data[0x328:])).digest()
-            digest = hashlib.sha512(
-                payload_digest + bytes(data[0x28:0x38])
-            ).digest()
+            h = hashlib.sha512()
+            h.update(data[0x328:])
+            payload_digest = h.digest()
+
+            h = hashlib.sha512()
+            h.update(payload_digest)
+            h.update(data[0x28:0x38])
+            digest = h.digest()
 
             sig = sign_digest(priv_key, digest)
             needs_reverse = False
         else:
-            msg = hashlib.sha256(data[0x328:]).digest()
+            h = hashlib.sha256()
+            h.update(data[0x328:])
+            msg = h.digest()
             sig = sign(msg, priv_key)
     else:
         no_signer = has_no_signer(data[-0x210:-0x206])
@@ -151,21 +157,24 @@ def main():
         if did_expand:
             data[-0x100:] = sig[::-1]
     if not did_expand:
-        with open(filename, "r+b") as f:
-            if is_sparse:
-                if signer_info_added:
-                    f.seek(0x328)
-                    f.write(data[0x328:0x428])
-                if needs_reverse:
-                    f.seek(0x28)
-                else:
-                    f.seek(0x38)
+        if is_sparse:
+            if signer_info_added:
+                data[0x328:0x428] = signer_info_if_null[:0x100]
+
+            if needs_reverse:
+                data[0x28:0x28 + len(sig)] = sig[::-1]
             else:
-                f.seek(-0x100, 2)
-            f.write(sig[::-1] if needs_reverse else sig)
+                data[0x38:0x38 + len(sig)] = sig
+        else:
+            offset = data.size() - 0x100
+            data[offset:offset + len(sig)] = sig[::-1] if needs_reverse else sig
     else:
         with open(filename, "wb") as f:
             f.write(data)
+
+    data.flush()
+    data.close()
+    file_handle.close()
 
 if __name__ == "__main__":
     main()
