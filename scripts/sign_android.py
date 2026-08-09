@@ -111,7 +111,7 @@ def main():
                 signer_info_if_null = signer
             else:
                 signer_info_if_null = get_signer_info_if_missing()
-            signer_info_if_null[0x9C:0x9C+0x64] = filename.encode().ljust(0x64, b"\x00")
+            signer_info_if_null[0x9C:0x9C+0x10] = filename.encode().ljust(0x10, b"\x00")
             signer_info_added = True
             data[0x328:0x428] = signer_info_if_null[:0x100]
 
@@ -135,7 +135,7 @@ def main():
                 signer_info_if_null = signer
             else:
                 signer_info_if_null = get_signer_info_if_missing()
-            signer_info_if_null[0x9C:0x9C+0x64] = filename.encode().ljust(0x64, b"\x00")
+            signer_info_if_null[0x9C:0x9C+0x10] = filename.encode().ljust(0x10, b"\x00")
             did_expand = True
             if is_bootimg:
                 print("bootimg detected!")
