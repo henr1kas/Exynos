@@ -36,13 +36,21 @@ def find_pattern(data, pattern_str, offset = 0):
         return match.start() + offset
     return None
 
-def patch_prevent_warranty_fuse(data): # AYB7 S926B offsets, TODO: sig
+def patch_prevent_warranty_fuse(data): # BYH2 S721B
     ret0 = [
         0xD2800000,
         0xD65F03C0,
     ]
-    write_words(data, 0x8C750, ret0) # set_warranty_void_bit_reason
-    write_words(data, 0x8F5C8, ret0) # set_warrant_bit
+    # seccmd_fwb has inlined warranty reaon setter, no point patching tho.
+    write_words(data, 0x904D8, ret0) # set_warranty_void_bit_reason
+    write_words(data, 0x932F4, ret0) # set_warrant_bit
+
+def patch_check_signature(data): # BYH2 S721B
+    ret0 = [
+        0xD2800000,
+        0xD65F03C0,
+    ]
+    write_words(data, 0x95A94, ret0)
 
 if __name__ == "__main__":
     #load
@@ -70,6 +78,7 @@ if __name__ == "__main__":
 
     #patches
     patch_prevent_warranty_fuse(data)
+    patch_check_signature(data)
 
     #write
     offset = 0

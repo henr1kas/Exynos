@@ -4,11 +4,8 @@ def soc_data():
     return SoC(
         signing_type=4,
         odin=(
-            Image("dtp.bin", ree=True, split=(
-                Image("dtp.bin", ree=True),
-                Image("tail.bin", stage=None), # signerv3
-            )),
-            Image("E2S_EUR_OPENX.pit", ree=True),
+            Image("dtp.bin", ree=True),
+            Image("R12S_EUR_OPENX.pit", ree=True),
             Image("fld.bin", ree=True, split=(
                 Image("pspbl1.bin", stage="st1"),
                 Image("dbgc.bin"),
