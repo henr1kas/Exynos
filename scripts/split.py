@@ -16,57 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import (
 )
 from cryptography.hazmat.primitives import hashes
 
-#TODO: use frmo sbl1.py
-class SBL1V5Footer(ctypes.LittleEndianStructure):
-    _pack_ = 1
-    _fields_ = [
-        # BL1 info
-        ("soc_info",           ctypes.c_uint8 * 8),
-        # CodeSigner V5
-        ("codesigner_version", ctypes.c_uint32),
-        ("ap_info",            ctypes.c_char * 4),
-        ("time",               ctypes.c_uint64),
-        ("rb_count",           ctypes.c_uint32),
-        ("signing_type",       ctypes.c_uint32),
-        ("description",        ctypes.c_char * 36),
-        ("key_index",          ctypes.c_uint32),
-        ("debug_certificate",  ctypes.c_uint8 * 0x1C),
-        ("st2_key_tee",        ctypes.c_uint8 * 524),
-        ("st2_key_ree",        ctypes.c_uint8 * 524),
-        ("func_ptr",           ctypes.c_uint8 * 128),
-        ("major_id",           ctypes.c_uint16),
-        ("minor_id",           ctypes.c_uint16),
-        ("reserved",           ctypes.c_uint8 * 0x8),
-        ("st1_publickey",      ctypes.c_uint8 * 524),
-        ("hmac",               ctypes.c_uint8 * 0x20),
-        ("signature_size",     ctypes.c_uint32),
-        ("signature",          ctypes.c_uint8 * 136),
-        ("padding",            ctypes.c_uint8 * 376)
-    ]
-
-class SBL1V4Footer(ctypes.LittleEndianStructure):
-    _pack_ = 1
-    _fields_ = [
-        # BL1 info
-        ("soc_info",           ctypes.c_uint8 * 8),
-        # CodeSigner V4
-        ("codesigner_version", ctypes.c_uint32),
-        ("ap_info",            ctypes.c_char * 4),
-        ("time",               ctypes.c_uint64),
-        ("rb_count",           ctypes.c_uint32),
-        ("signing_type",       ctypes.c_uint32),
-        ("debug_certificate",  ctypes.c_uint8 * 0x1C),
-        ("key_index",          ctypes.c_uint32),
-        ("st2_publickey",      ctypes.c_uint8 * 0x10C),
-        ("func_ptr",           ctypes.c_uint8 * 0x80),
-        ("major_id",           ctypes.c_uint16),
-        ("minor_id",           ctypes.c_uint16),
-        ("reserved",           ctypes.c_uint8 * 0x8),
-        ("st1_publickey",      ctypes.c_uint8 * 0x10C),
-        ("hmac",               ctypes.c_uint8 * 0x20),
-        ("signature_size",     ctypes.c_uint32),
-        ("signature",          ctypes.c_uint8 * 0x100),
-    ]
+from sbl1 import SBL1RSA, SBL1ECDSA
 
 def print_struct(obj):
     for field_name, field_type in obj._fields_:
@@ -88,9 +38,9 @@ def print_struct(obj):
 
 def load_sbl1_footer(data):
     sbl1_size = 512 * int.from_bytes(data[:4], byteorder="little", signed=False)
-    footer = SBL1V5Footer.from_buffer_copy(data[sbl1_size - ctypes.sizeof(SBL1V5Footer):sbl1_size])
+    footer = SBL1ECDSA(sbl1_size).from_buffer_copy(data[:sbl1_size])
     if footer.codesigner_version not in (4, 5):
-        return SBL1V4Footer.from_buffer_copy(data[sbl1_size - ctypes.sizeof(SBL1V4Footer):sbl1_size])
+        return SBL1RSA(sbl1_size).from_buffer_copy(data[:sbl1_size])
     return footer
 
 def u32(data, off):

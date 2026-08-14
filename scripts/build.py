@@ -10,10 +10,7 @@ def sign(
     stage,
     update_header=False,
     ree=False,
-    sbl1_json=None,
     signing_type=0,
-    avb_name="",
-    avb_size=0,
     keys_path=None,
     rb_count=None,
 ):
@@ -21,8 +18,6 @@ def sign(
         raise ValueError("keys_path is required")
 
     cmd = [sys.executable, "scripts/sign.py", image_path, keys_path, stage]
-    if stage == "st1" and sbl1_json and os.path.exists(sbl1_json):
-        cmd += ["--sbl1-json", sbl1_json]
     if update_header:
         cmd.append("--update-header")
     if ree:
@@ -30,8 +25,6 @@ def sign(
     if rb_count is not None:
         cmd += ["--rb-count", rb_count]
     cmd += ["--signing-type", str(signing_type)]
-    cmd += ["--avb-partition-name", avb_name]
-    cmd += ["--avb-partition-size", str(avb_size)]
     subprocess.run(cmd, check=True)
 
 
@@ -49,14 +42,12 @@ def build_image(
     keys_path,
     signing_type,
     rb_count=None,
-    sbl1_json=None,
 ):
     """Build and sign one image after recursively building its children."""
     image_path = os.path.join(parent_dir, image.name)
 
     if getattr(image, "split", None):
         parts_dir = os.path.join(parent_dir, os.path.splitext(image.name)[0])
-        child_sbl1_json = os.path.join(parts_dir, "sbl1.json")
 
         for child in image.split:
             build_image(
@@ -65,7 +56,6 @@ def build_image(
                 keys_path,
                 signing_type,
                 rb_count=rb_count,
-                sbl1_json=child_sbl1_json,
             )
 
         merge(
@@ -79,13 +69,21 @@ def build_image(
             stage=image.stage,
             update_header=image.update_header,
             ree=image.ree,
-            sbl1_json=sbl1_json,
-            avb_name=image.avb,
-            avb_size=image.size,
             signing_type=signing_type,
             keys_path=keys_path,
             rb_count=rb_count,
         )
+
+    if image.avb:
+        subprocess.run([
+            sys.executable, "scripts/avbtool.py", "add_hash_footer",
+            "--image", image_path,
+            "--partition_name", image.avb,
+            "--partition_size", str(image.size),
+            "--key", os.path.join(keys_path, "avb.pem"),
+            "--algorithm", "SHA256_RSA4096",
+            "--salt", "0000000000000000000000000000000000000000000000000000000000000000",
+        ], check=True)
 
 
 def main(argv=None):
