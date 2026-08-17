@@ -8,55 +8,119 @@ import os
 def write_u32(data, offset, value):
     struct.pack_into("<I", data, offset, value)
 
-def write_words(data, offset, words):
-    for i, word in enumerate(words):
-        write_u32(data, offset + i * 4, word)
+BASE = 0xF4800000
+FUNCTION_START = bytes.fromhex("7F 23 03 D5")
+RETURN_ZERO = bytes.fromhex("00 00 80 D2 C0 03 5F D6")
 
-def jump_to_func_from(from_addr, to_addr):
-    return 0x94000000 | (((to_addr - from_addr) >> 2) & 0x03FFFFFF)
+def word(data, offset):
+    return int.from_bytes(data[offset : offset + 4], "little")
 
-def resolve_bl(data, pc_address):
-    if pc_address is None:
+def signed(value, bits):
+    sign = 1 << (bits - 1)
+    return (value ^ sign) - sign
+
+def adrp_add(data, offset):
+    adrp = word(data, offset)
+    if adrp & 0x9F000000 != 0x90000000:
         return None
-    instr = struct.unpack_from("<I", data, pc_address)[0]
-    imm26 = instr & 0x03FFFFFF
-    if imm26 & 0x02000000:
-        imm26 -= 0x04000000
-    return pc_address + imm26 * 4
 
-def find_pattern(data, pattern_str, offset = 0):
-    regex_bytes = b""
-    for token in pattern_str.split():
-        if token == "?":
-            regex_bytes += b"."
-        else:
-            regex_bytes += re.escape(bytes.fromhex(token))
-    match = re.compile(regex_bytes, re.DOTALL).search(data)
-    if match:
-        return match.start() + offset
-    return None
+    imm = ((adrp >> 29) & 3) | (((adrp >> 5) & 0x7FFFF) << 2)
+    page = ((BASE + offset) & ~0xFFF) + (signed(imm, 21) << 12)
+    for distance in range(4, 17, 4):
+        add = word(data, offset + distance)
+        if add & 0xFF000000 == 0x91000000 and (add >> 5) & 31 == adrp & 31:
+            return page + (((add >> 10) & 0xFFF) << (12 if add & 0x400000 else 0))
 
-def patch_prevent_warranty_fuse(data): # BYH2 S721B
-    ret0 = [
-        0xD2800000,
-        0xD65F03C0,
+def find_xref(data, string):
+    string_offset = data.index(string)
+    target = BASE + string_offset
+    refs = [
+        offset
+        for offset in range(0, string_offset & ~3, 4)
+        if adrp_add(data, offset) == target
     ]
-    # seccmd_fwb has inlined warranty reaon setter, no point patching tho.
-    write_words(data, 0x904D8, ret0) # set_warranty_void_bit_reason
-    write_words(data, 0x932F4, ret0) # set_warrant_bit
+    if len(refs) != 1:
+        raise ValueError(f"expected one xref to {string!r}, found {len(refs)}")
+    return refs[0]
 
-def patch_check_signature(data): # BYH2 S721B
-    ret0 = [
-        0xD2800000,
-        0xD65F03C0,
-    ]
-    write_words(data, 0x95A94, ret0)
+def patch_cm_otp_write_usb_boot_disable(data):
+    cm_otp_write_usb_boot_disable = (
+        find_xref(data, b"[OTP] USB_BOOT_DISABLE program start\n\0") - 0x14
+    )
+    if data[cm_otp_write_usb_boot_disable : cm_otp_write_usb_boot_disable + 4] != FUNCTION_START:
+        raise ValueError("cm_otp_write_usb_boot_disable not found")
+    else:
+        print(f"cm_otp_write_usb_boot_disable: +0x{hex(cm_otp_write_usb_boot_disable)}")
+    data[cm_otp_write_usb_boot_disable : cm_otp_write_usb_boot_disable + 8] = RETURN_ZERO
+
+def patch_get_fmm_data(data):
+    get_fmm_data = find_xref(data, b"[FMM] Set RPMB Default info to 512\n\0") - 0x30
+    if data[get_fmm_data : get_fmm_data + 4] != FUNCTION_START:
+        raise ValueError("get_fmm_data not found")
+    else:
+        print(f"get_fmm_data: +0x{hex(get_fmm_data)}")
+    data[get_fmm_data : get_fmm_data + 8] = RETURN_ZERO
+
+def patch_set_warranty_void_bit_reason(data):
+    set_warranty_void_bit_reason = (
+        find_xref(data, b"CURRENT BINARY: Samsung Official\n\0") - 0x28C
+    )
+    if data[set_warranty_void_bit_reason : set_warranty_void_bit_reason + 4] != FUNCTION_START:
+        raise ValueError("set_warranty_void_bit_reason not found")
+    else:
+        print(f"set_warranty_void_bit_reason: +0x{hex(set_warranty_void_bit_reason)}")
+    data[set_warranty_void_bit_reason : set_warranty_void_bit_reason + 8] = RETURN_ZERO
+
+def patch_set_warrant_bit(data):
+    set_warrant_bit = find_xref(data, b"[EFUSE] Set warranty bit(0x%llx)\n\0") - 0x60
+    if data[set_warrant_bit : set_warrant_bit + 4] != FUNCTION_START:
+        raise ValueError("set_warrant_bit not found")
+    else:
+        print(f"set_warrant_bit: +0x{hex(set_warrant_bit)}")
+    data[set_warrant_bit : set_warrant_bit + 8] = RETURN_ZERO
+
+def patch_read_dmc_rpmb(data):
+    read_dmc_rpmb = find_xref(data, b"%s : all zero\n\0") - 0xB8
+    if data[read_dmc_rpmb : read_dmc_rpmb + 4] != FUNCTION_START:
+        raise ValueError("read_dmc_rpmb not found")
+    else:
+        print(f"read_dmc_rpmb: +0x{hex(read_dmc_rpmb)}")
+    data[read_dmc_rpmb : read_dmc_rpmb + 8] = RETURN_ZERO
+
+def patch_keystorage_avb_keys(data, key):
+    # TODO: keystorage parser
+    pattern = bytes.fromhex("""
+74 65 73 74 5F 6B 65 79 00 00 00 00 00 00 00 00 B6 A7 4B 56 04 00 00 00
+63 70 5F 6B 65 79 00 00 00 00 00 00 00 00 00 00 3D 66 F8 8A 04 00 00 00
+76 62 6D 65 74 61 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+62 6F 6F 74 6C 6F 61 64 65 72 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+6C 64 66 77 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+74 7A 73 77 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+6B 65 79 73 74 6F 72 61 67 65 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+66 6C 64 00 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+68 61 72 78 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+72 65 63 6F 76 65 72 79 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
+6E 6F 6E 65 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+6E 6F 6E 65 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+6E 6F 6E 65 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+6E 6F 6E 65
+    """)
+    if pattern not in data:
+        print("order changed! bad patch")
+        return
+    for i in range(8):
+        offset = 0xA80 + (i * 0x420)
+        data[offset:offset + len(key)] = key
 
 if __name__ == "__main__":
     #load
-    sboot_dir = sys.argv[1]
+    keys_dir = sys.argv[1]
+    output_dir = sys.argv[2]
+
+    sboot_dir = os.path.join(output_dir, "sboot")
     bootloader_dir = os.path.join(sboot_dir, "bootload")
     output_bootload = os.path.join(sboot_dir, "bootload.bin")
+    output_keystorage = os.path.join(os.path.join(output_dir, "keystorage"), "keystorage.bin")
 
     files = [
         "bootload_part1.bin",
@@ -77,8 +141,14 @@ if __name__ == "__main__":
         sizes.append(len(piece))
 
     #patches
-    patch_prevent_warranty_fuse(data)
-    patch_check_signature(data)
+    patch_cm_otp_write_usb_boot_disable(data)
+    patch_get_fmm_data(data)
+    patch_set_warranty_void_bit_reason(data)
+    patch_set_warrant_bit(data)
+    try:
+        patch_read_dmc_rpmb(data)
+    except:
+        print("dmc patch not found. ok if old build")
 
     #write
     offset = 0
@@ -90,3 +160,12 @@ if __name__ == "__main__":
         offset += size
     with open(output_bootload, "wb") as f:
         f.write(data)
+    
+    # keystorage patch
+    with open(os.path.join(keys_dir, "avb.pubkey"), "rb") as f:
+        avb_pubkey = f.read()
+    with open(output_keystorage, "rb") as f:
+        keystorage_data = bytearray(f.read())
+    patch_keystorage_avb_keys(keystorage_data, avb_pubkey)
+    with open(output_keystorage, "wb") as f:
+        f.write(keystorage_data)
