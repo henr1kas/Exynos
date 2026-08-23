@@ -4,6 +4,7 @@ import re
 import sys
 import struct
 import os
+import keystorage
 
 def write_u32(data, offset, value):
     struct.pack_into("<I", data, offset, value)
@@ -88,29 +89,9 @@ def patch_read_dmc_rpmb(data):
     data[read_dmc_rpmb : read_dmc_rpmb + 8] = RETURN_ZERO
 
 def patch_keystorage_avb_keys(data, key):
-    # TODO: keystorage parser
-    pattern = bytes.fromhex("""
-74 65 73 74 5F 6B 65 79 00 00 00 00 00 00 00 00 B6 A7 4B 56 04 00 00 00
-63 70 5F 6B 65 79 00 00 00 00 00 00 00 00 00 00 3D 66 F8 8A 04 00 00 00
-76 62 6D 65 74 61 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-62 6F 6F 74 6C 6F 61 64 65 72 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-6C 64 66 77 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-74 7A 73 77 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-6B 65 79 73 74 6F 72 61 67 65 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-66 6C 64 00 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-68 61 72 78 00 00 00 00 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-72 65 63 6F 76 65 72 79 00 00 00 00 00 00 00 00 AA 78 3A D2 FF 00 00 00
-6E 6F 6E 65 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-6E 6F 6E 65 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-6E 6F 6E 65 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-6E 6F 6E 65
-    """)
-    if pattern not in data:
-        print("order changed! bad patch")
-        return
-    for i in range(8):
-        offset = 0xA80 + (i * 0x420)
-        data[offset:offset + len(key)] = key
+    for slot, meta in enumerate(data.header.key_meta[:data.header.key_count]):
+        if meta.sign_type == 0xff:
+            data.set_pubkey(slot, key)
 
 if __name__ == "__main__":
     #load
@@ -164,8 +145,6 @@ if __name__ == "__main__":
     # keystorage patch
     with open(os.path.join(keys_dir, "avb.pubkey"), "rb") as f:
         avb_pubkey = f.read()
-    with open(output_keystorage, "rb") as f:
-        keystorage_data = bytearray(f.read())
-    patch_keystorage_avb_keys(keystorage_data, avb_pubkey)
-    with open(output_keystorage, "wb") as f:
-        f.write(keystorage_data)
+    image = keystorage.load(output_keystorage)
+    patch_keystorage_avb_keys(image, avb_pubkey)
+    image.save(output_keystorage)
