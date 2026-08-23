@@ -6,8 +6,6 @@ class Image:
     stage: str | None = "st2"
     update_header: bool = False
     ree: bool = False
-    avb: str = ""
-    size: int = 0
     split: tuple["Image", ...] = ()
 
 @dataclass(frozen=True)

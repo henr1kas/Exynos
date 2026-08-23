@@ -43,7 +43,6 @@ def build_image(
     signing_type,
     rb_count=None,
 ):
-    """Build and sign one image after recursively building its children."""
     image_path = os.path.join(parent_dir, image.name)
 
     if getattr(image, "split", None):
@@ -73,18 +72,6 @@ def build_image(
             keys_path=keys_path,
             rb_count=rb_count,
         )
-
-    if image.avb:
-        subprocess.run([
-            sys.executable, "scripts/avbtool.py", "add_hash_footer",
-            "--image", image_path,
-            "--partition_name", image.avb,
-            "--partition_size", str(image.size),
-            "--key", os.path.join(keys_path, "avb.pem"),
-            "--algorithm", "SHA256_RSA4096",
-            "--salt", "0000000000000000000000000000000000000000000000000000000000000000",
-        ], check=True)
-
 
 def main(argv=None):
     if argv is None:

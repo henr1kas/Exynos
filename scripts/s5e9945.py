@@ -20,10 +20,6 @@ def soc_data():
                 Image("keystorage.bin"),
                 Image("tail.bin", stage=None), # signerv3
             )),
-            Image("keystorage.bin", ree=True, split=(
-                Image("keystorage.bin"),
-                Image("tail.bin", stage=None), # signerv3
-            )),
             Image("ldfw.img", ree=True, split=(
                 Image("ldfw.bin"),
                 Image("tail.bin", stage=None), # signerv3
@@ -56,7 +52,6 @@ def soc_data():
                 Image("tail.bin", stage=None), # signerv3
             )),
             Image("uh.bin", ree=True),
-            Image("up_param.bin", ree=True),
-            Image("vbmeta.img", ree=True),
+            Image("up_param.bin", ree=True)
         )
     )
