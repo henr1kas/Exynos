@@ -29,7 +29,7 @@ RSA_EXP_SIZE = 0x4
 SPARSE_MAGIC = 0xED26FF3A
 EROFS_MAGIC = 0xE0F5E1E2
 
-def load_private_key(path, sign_type):
+def load_private_key(path):
     with open(path, "rb") as f:
         pem = f.read()
     key = serialization.load_pem_private_key(pem, password=None)

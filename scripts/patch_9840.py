@@ -64,7 +64,7 @@ def get_efuse_data():
         hmac_key = f.read()
     if len(hmac_key) != 32:
         raise ValueError("hmac.bin should be 32 bytes")
-    key = load_private_key("keys/4/st1.pem", 4)
+    key = load_private_key("keys/4/st1.pem")
     public_blob = pubkey_blob(key.public_key(), 4)
     return bytes(a ^ b for a, b in zip(hmac.digest(hmac_key, public_blob[:136], "sha512")[:32], hmac_key))
 

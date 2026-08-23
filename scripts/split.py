@@ -82,6 +82,7 @@ def is_good_sig_ecdsa(data, public_key, clear_digest):
 def is_good_sig_rsa(data, public_key, clear_digest):
     signature = bytes(data[-0x100:])[::-1]
     signed_data = bytearray(data[:-0x100])
+
     if clear_digest:
         signed_data[4:8] = bytes(4)
     try:
@@ -222,7 +223,6 @@ def split_file_by_sigs(
         for offset, _ in failed:
             print(f"{output_dir}: failed to find start for {offset + sig_size}")
 
-# todo: i dont remember if works v4
 def split_file_wrapper(data, sboot_split_names, output_dir, footer):
     if footer.codesigner_version == 5:
         pub_keys = [load_public_key(footer.st2_key_tee, footer.codesigner_version == 5), load_public_key(footer.st2_key_ree, footer.codesigner_version == 5)]
@@ -239,6 +239,11 @@ def split_file_wrapper(data, sboot_split_names, output_dir, footer):
         sig_meme = sboot[offset_sig_meme : offset_sig_meme + 16].tobytes()
     
     sigs = find_st2(sboot, offset_sig_meme, sig_meme, footer.codesigner_version == 5)
+    # crc is nulled here on 9810 bl31 sig, idk why. TODO: find it without hack
+    v = int.from_bytes(bytes(footer.soc_info[0:4]), "little")
+    if v == 622849:
+        sigs = [[0x14EF0, 0]] + sigs
+    print(sigs)
     split_file_by_sigs(
         output_dir,
         sboot,

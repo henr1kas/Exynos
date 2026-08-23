@@ -4,19 +4,7 @@ import os
 import subprocess
 import sys
 
-
-def sign(
-    image_path,
-    stage,
-    update_header=False,
-    ree=False,
-    signing_type=0,
-    keys_path=None,
-    rb_count=None,
-):
-    if keys_path is None:
-        raise ValueError("keys_path is required")
-
+def sign(image_path, stage, update_header, ree, signing_type, keys_path, rb_count):
     cmd = [sys.executable, "scripts/sign.py", image_path, keys_path, stage]
     if update_header:
         cmd.append("--update-header")
@@ -27,7 +15,6 @@ def sign(
     cmd += ["--signing-type", str(signing_type)]
     subprocess.run(cmd, check=True)
 
-
 def merge(paths, out_path):
     with open(out_path, "wb") as f:
         for path in paths:
@@ -35,19 +22,10 @@ def merge(paths, out_path):
                 while chunk := part.read(1024 * 1024):
                     f.write(chunk)
 
-
-def build_image(
-    image,
-    parent_dir,
-    keys_path,
-    signing_type,
-    rb_count=None,
-):
+def build_image(image, parent_dir, keys_path, signing_type, rb_count):
     image_path = os.path.join(parent_dir, image.name)
-
     if getattr(image, "split", None):
         parts_dir = os.path.join(parent_dir, os.path.splitext(image.name)[0])
-
         for child in image.split:
             build_image(
                 child,
@@ -56,22 +34,12 @@ def build_image(
                 signing_type,
                 rb_count=rb_count,
             )
-
         merge(
             [os.path.join(parts_dir, child.name) for child in image.split],
             image_path,
         )
-
     if image.stage is not None:
-        sign(
-            image_path,
-            stage=image.stage,
-            update_header=image.update_header,
-            ree=image.ree,
-            signing_type=signing_type,
-            keys_path=keys_path,
-            rb_count=rb_count,
-        )
+        sign(image_path, stage=image.stage, update_header=image.update_header, ree=image.ree, signing_type=signing_type, keys_path=keys_path, rb_count=rb_count)
 
 def main(argv=None):
     if argv is None:
@@ -82,24 +50,14 @@ def main(argv=None):
             file=sys.stderr,
         )
         return 2
-
     soc_name, keys_path, work_dir = argv[:3]
     rb_count = argv[3] if len(argv) == 4 else None
     soc_module = importlib.import_module(soc_name)
     soc = soc_module.soc_data()
-
     os.makedirs(work_dir, exist_ok=True)
     for image in soc.odin:
-        build_image(
-            image,
-            work_dir,
-            keys_path,
-            soc.signing_type,
-            rb_count=rb_count,
-        )
-
+        build_image(image, work_dir, keys_path, soc.signing_type, rb_count=rb_count)
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

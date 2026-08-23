@@ -78,8 +78,8 @@ def get_efuse_data():
         hmac_key = f.read()
     if len(hmac_key) != 32:
         raise ValueError("hmac.bin should be 32 bytes")
-    key = load_private_key("keys/st1.pem")
-    public_blob = pubkey_blob(key.public_key())
+    key = load_private_key("keys/0/st1.pem")
+    public_blob = pubkey_blob(key.public_key(), 0)
     return bytes(a ^ b for a, b in zip(hmac.digest(hmac_key, public_blob, "sha256"), hmac_key))
 
 def patch_fuse_boot_key(data, kg_check, cm_otp_write_rom_sec_boot_key, cm_otp_write_use_rom_sec_boot_key):
@@ -96,7 +96,7 @@ def patch_fuse_boot_key(data, kg_check, cm_otp_write_rom_sec_boot_key, cm_otp_wr
     payload.extend(struct.unpack("<8I", get_efuse_data()))
     write_words(data, kg_check, payload)
 
-should_fuse_key = False # if True will burn BOOT_KEY once you UFS boot to ODIN MODE
+should_fuse_key = True # if True will burn BOOT_KEY once you UFS boot to ODIN MODE
 
 if __name__ == "__main__":
     with open(sys.argv[1], "rb") as f:
