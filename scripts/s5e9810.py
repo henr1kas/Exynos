@@ -14,7 +14,7 @@ def soc_data():
                 Image("u-boot.bin"),
                 Image("el3_mon.bin"),
                 Image("secure_payload.bin"),
-                Image("tail.bin"),
+                Image("tail.bin", stage=None),
             )),
         )
     )
