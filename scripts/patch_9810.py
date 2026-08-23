@@ -68,6 +68,16 @@ def patch_initialize_efuse_data(data): # these patches should be moved to el3_mo
     write_u32(data, commercial_bit + 16, 0x52800020) # test_bit 1
     write_u32(data, commercial_bit + 32, 0x52800000) # warranty_bit 0
 
+def patch_set_warranty_void_bit_reason(data): # TODO: may not be needed if DEV DEVICE?
+    set_warranty_void_bit_reason = find_xref(data, b"%s : no reason\n\0") + 0x18
+    print(f"set_warranty_void_bit_reason: {set_warranty_void_bit_reason:#x}")
+    data[set_warranty_void_bit_reason : set_warranty_void_bit_reason + len(RETURN_ZERO)] = RETURN_ZERO
+
+def patch_set_warranty_bit(data): # TODO: may not be needed if DEV DEVICE?
+    set_warranty_bit = find_xref(data, b"[EFUSE] Set warranty bit(%d)\n\0") - 0x58
+    print(f"set_warranty_bit: {set_warranty_bit:#x}")
+    data[set_warranty_bit : set_warranty_bit + len(RETURN_ZERO)] = RETURN_ZERO
+
 def patch_read_rmm_rpmb(data): # n10l does not have this i think? TODO
     read_rmm_rpmb = find_xref(data, b"[RMM] read_data fail...\n\0") - 0x50
     print(f"read_rmm_rpmb: {read_rmm_rpmb:#x}")
@@ -124,6 +134,8 @@ if __name__ == "__main__":
 
     patch_check_signature(data)
     patch_initialize_efuse_data(data)
+    patch_set_warranty_void_bit_reason(data)
+    patch_set_warranty_bit(data)
     patch_read_rmm_rpmb(data)
     patch_read_kg_rpmb(data)
     patch_have_this_mode(data)
