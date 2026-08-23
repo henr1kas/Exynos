@@ -6,12 +6,11 @@ import struct
 import os
 import keystorage
 
-def write_u32(data, offset, value):
-    struct.pack_into("<I", data, offset, value)
-
-BASE = 0xF4800000
 FUNCTION_START = bytes.fromhex("7F 23 03 D5")
 RETURN_ZERO = bytes.fromhex("00 00 80 D2 C0 03 5F D6")
+
+def write_u32(data, offset, value):
+    struct.pack_into("<I", data, offset, value)
 
 def word(data, offset):
     return int.from_bytes(data[offset : offset + 4], "little")
@@ -26,19 +25,24 @@ def adrp_add(data, offset):
         return None
 
     imm = ((adrp >> 29) & 3) | (((adrp >> 5) & 0x7FFFF) << 2)
-    page = ((BASE + offset) & ~0xFFF) + (signed(imm, 21) << 12)
+    page = (offset & ~0xFFF) + (signed(imm, 21) << 12)
     for distance in range(4, 17, 4):
         add = word(data, offset + distance)
         if add & 0xFF000000 == 0x91000000 and (add >> 5) & 31 == adrp & 31:
             return page + (((add >> 10) & 0xFFF) << (12 if add & 0x400000 else 0))
+    return None
 
 def find_xref(data, string):
-    string_offset = data.index(string)
-    target = BASE + string_offset
+    string_offset = data.find(string)
+    if string_offset < 0:
+        raise ValueError(f"string not found: {string!r}")
+    if data.find(string, string_offset + 1) >= 0:
+        raise ValueError(f"expected one copy of {string!r}")
+
     refs = [
         offset
         for offset in range(0, string_offset & ~3, 4)
-        if adrp_add(data, offset) == target
+        if adrp_add(data, offset) == string_offset
     ]
     if len(refs) != 1:
         raise ValueError(f"expected one xref to {string!r}, found {len(refs)}")
