@@ -243,7 +243,6 @@ def split_file_wrapper(data, sboot_split_names, output_dir, footer):
     v = int.from_bytes(bytes(footer.soc_info[0:4]), "little")
     if v == 622849:
         sigs = [[0x14EF0, 0]] + sigs
-    print(sigs)
     split_file_by_sigs(
         output_dir,
         sboot,
