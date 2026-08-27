@@ -179,12 +179,12 @@ if __name__ == "__main__":
 
     key_dir = os.path.join(args.keys_dir, str(args.signing_type))
     st2_privatekeys = []
-    st1_privatekey = load_private_key(os.path.join(key_dir, "st1.pem"), args.signing_type)
+    st1_privatekey = load_private_key(os.path.join(key_dir, "st1.pem"))
     if args.signing_type == 0:
-        st2_privatekeys.append(load_private_key(os.path.join(key_dir, "st2.pem"), args.signing_type))
+        st2_privatekeys.append(load_private_key(os.path.join(key_dir, "st2.pem")))
     else:
-        st2_privatekeys.append(load_private_key(os.path.join(key_dir, "st2t.pem"), args.signing_type))
-        st2_privatekeys.append(load_private_key(os.path.join(key_dir, "st2r.pem"), args.signing_type))
+        st2_privatekeys.append(load_private_key(os.path.join(key_dir, "st2t.pem")))
+        st2_privatekeys.append(load_private_key(os.path.join(key_dir, "st2r.pem")))
     with open(os.path.join(args.keys_dir, "hmac.bin"), "rb") as f:
         hmac_key = f.read()
 
