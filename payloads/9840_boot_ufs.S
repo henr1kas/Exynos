@@ -75,4 +75,4 @@ loader:
 fail:
     b       fail
 efuse:
-    .incbin "st1.efuse"
+    .incbin "efuse_4.bin"

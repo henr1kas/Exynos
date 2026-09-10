@@ -102,7 +102,7 @@ fail_check:
 
 .align 4
 efuse:
-    .incbin "efuse.bin"
+    .incbin "efuse_4.bin"
 aBl1VerifyFail:
     .string "BL1 Verify Fail"
 aBl1CheckFail:
