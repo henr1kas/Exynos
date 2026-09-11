@@ -64,34 +64,32 @@ def get_efuse_data():
     return bytes(a ^ b for a, b in zip(hmac.digest(hmac_key, public_blob, "sha256"), hmac_key))
 
 def patch_fuse_boot_key(data): # currently hardcoded for G935FXXU8EZCD
-    some_fuse_thing = 0x15D9C
-    smc_call = 0x21A4
+    odin_useless_func = 0x11524 # the function that prints text on download mode replaced to fuse
     print("WARNING: patching for burning BOOT_KEY!")
 
     payload = [
-        0xA9BE5BF5,  # stp x21, x22, [sp, #-0x20]!
-        0xF9000BFE,  # str x30, [sp, #0x10]
-        0x10000235,  # adr x21, 8F015DE8
-        0x52800216,  # mov w22, #0x10
-        0x180001C0,  # ldr w0, smc_id
+        0xA9BF57F4,  # stp x20, x21, [sp, #-0x10]!
+        0x10000255,  # adr x21, key (PC + 0x48)
+        0x52800214,  # mov w20, #0x10
+        0x180001E0,  # loop: ldr w0, smc_id
         0x28C10EA1,  # ldp w1, w3, [x21], #8
-        0x2A1603E2,  # mov w2, w22
-        jump_to_func_from(some_fuse_thing + 0x1C, smc_call),
-        0x110006D6,  # add w22, w22, #1
-        0x3617FF76,  # tbz w22, #2, loop
+        0x2A1403E2,  # mov w2, w20
+        0xD5033F9F,  # dsb sy
+        0xD4000003,  # smc #0
+        0x11000694,  # add w20, w20, #1
+        0x3617FF54,  # tbz w20, #2, loop
         0x18000100,  # ldr w0, smc_id
         0xAA1F03E1,  # mov x1, xzr
         0x52800022,  # mov w2, #1
         0xAA1F03E3,  # mov x3, xzr
-        jump_to_func_from(some_fuse_thing + 0x38, smc_call),
-        0xF9400BFE,  # ldr x30, [sp, #0x10]
-        0xA8C25BF5,  # ldp x21, x22, [sp], #0x20
+        0xD5033F9F,  # dsb sy
+        0xD4000003,  # smc #0
+        0xA8C157F4,  # ldp x20, x21, [sp], #0x10
         0xD65F03C0,  # ret
         0xC2001014,  # smc_id literal
     ]
     payload.extend(struct.unpack("<8I", get_efuse_data()))
-    write_words(data, some_fuse_thing, payload)
-    write_u32(data, 0x116DC, 0x940011B0) # SECURE DOWNLOAD print string now goes to 0x15D9C
+    write_words(data, odin_useless_func, payload)
 
 should_fuse_key = True # Burns BOOT_KEY once after UFS boot into ODIN MODE.
 
