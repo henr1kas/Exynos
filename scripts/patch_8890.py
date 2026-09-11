@@ -63,8 +63,8 @@ def get_efuse_data():
     public_blob = pubkey_blob(key.public_key(), 0)
     return bytes(a ^ b for a, b in zip(hmac.digest(hmac_key, public_blob, "sha256"), hmac_key))
 
-def patch_fuse_boot_key(data): # currently hardcoded for G935FXXU8EZCD
-    odin_useless_func = 0x11524 # the function that prints text on download mode replaced to fuse
+def patch_fuse_boot_key(data):
+    odin_useless_func = find_xref(data, b"ODIN MODE\0") - 0x5C
     print("WARNING: patching for burning BOOT_KEY!")
 
     payload = [
