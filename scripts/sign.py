@@ -97,12 +97,13 @@ def sign_st2(data, sign_type, st2_privatekey, rb_count, key_type, key_index, upd
     signerinfo_size = ctypes.sizeof(SignerInfo)
     is_sparse = data[:4] == struct.pack("<I", SPARSE_MAGIC)
     is_erofs = data[0x400:0x404] == struct.pack("<I", EROFS_MAGIC)
+    legacy_sparse_rsa = is_sparse and sign_type == 0 and data[0x320:0x328] == b"SSANDOID"
 
     if is_erofs:
         signerinfo_offset = 0x300
     elif is_sparse:
-        footer_offset = 0x28
-        signerinfo_offset = 0x328
+        footer_offset = 0x220 if legacy_sparse_rsa else 0x28
+        signerinfo_offset = 0x430 if legacy_sparse_rsa else 0x328
     else:
         footer_offset = get_target_boundary(data)
         if update_header:
@@ -140,7 +141,7 @@ def sign_st2(data, sign_type, st2_privatekey, rb_count, key_type, key_index, upd
 
     if is_sparse:
         payload = memoryview(data)[signerinfo_offset:]
-        payload_digest = hashlib.sha256(payload).digest() if sign_type == 0 else hashlib.sha512(payload).digest()
+        payload_digest = hashlib.sha1(payload).digest() if legacy_sparse_rsa else hashlib.sha256(payload).digest() if sign_type == 0 else hashlib.sha512(payload).digest()
         payload.release()
         signed_data = payload_digest if sign_type == 0 else hashlib.sha512(payload_digest + data[footer_offset:footer_offset + 0x10]).digest()
     else:
@@ -153,6 +154,8 @@ def sign_st2(data, sign_type, st2_privatekey, rb_count, key_type, key_index, upd
 
     if sparse_rsa:
         data[footer_offset:footer_offset + 0x100] = signature
+        if legacy_sparse_rsa:
+            data[0x328:0x428] = signature
     else:
         footer.signature[:] = signature
     if update_header and not is_sparse:
