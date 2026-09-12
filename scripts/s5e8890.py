@@ -14,6 +14,13 @@ def soc_data():
                 Image("el3_mon.bin"),
                 Image("tail.bin", stage=None),
             )),
+            Image("modem.bin", split=(
+                Image("TOC.bin", stage=None),
+                Image("BOOT.bin"),
+                Image("pad.bin", stage=None),
+                Image("MAIN.bin"),
+                Image("tail.bin", stage=None),
+            )),
             Image("HERO2LTE_EUR_OPEN_HIDDEN45M.pit")
         )
     )

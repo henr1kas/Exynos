@@ -81,16 +81,23 @@ def is_good_sig_ecdsa(data, public_key, clear_digest):
 
 def is_good_sig_rsa(data, public_key, clear_digest):
     signature = bytes(data[-0x100:])[::-1]
-    signed_data = bytearray(data[:-0x100])
+    signed_data = data[:-0x100]
 
+    hasher = hashlib.sha256()
     if clear_digest:
-        signed_data[4:8] = bytes(4)
+        hasher.update(signed_data[:4])
+        hasher.update(b"\x00\x00\x00\x00")
+        hasher.update(signed_data[8:])
+    else:
+        hasher.update(signed_data)
+    digest = hasher.digest()
+
     try:
         public_key.verify(
             signature,
-            signed_data,
+            digest,
             padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32),
-            hashes.SHA256(),
+            Prehashed(hashes.SHA256()),
         )
     except InvalidSignature:
         return False
@@ -110,7 +117,7 @@ def find_st2(mv, offset_sig_meme, sig_meme_bytes, is_v5):
             + b'\x00' * 0x14
         )
     else:
-        pattern = re.escape(sig_meme_bytes)
+        pattern = re.escape(sig_meme_bytes) + b'(.{4})'
     search_window = mv[:offset_sig_meme]
     results = []
     for match in re.finditer(pattern, search_window):
@@ -143,11 +150,36 @@ def get_output_name(index, is_pad=False, custom_names=()):
         return custom_names[index]
     return f"{index}_pad.bin" if is_pad else f"{index}.bin"
 
-def find_blocks_by_sigs(data, sigs, pub_keys, is_v5, step_size):
+def get_toc_start_hints(data):
+    if len(data) < 0x20 or bytes(data[:4]) != b"TOC\x00":
+        return {}
+    toc_size = u32(data, 0x14)
+    if toc_size < 0x20 or toc_size > min(len(data), 0x100000) or toc_size % 0x20:
+        return {}
+
+    hints = {}
+    for entry_off in range(0, toc_size, 0x20):
+        entry = data[entry_off:entry_off + 0x20]
+        name = bytes(entry[:12]).split(b"\x00", 1)[0]
+        if not name:
+            continue
+        start = u32(data, entry_off + 0x0C)
+        size = u32(data, entry_off + 0x14)
+        end = start + size
+        if size == 0 or end > len(data):
+            continue
+        if name != b"TOC":
+            hints.setdefault(end, []).append(start)
+    return hints
+
+def find_blocks_by_sigs(data, sigs, pub_keys, is_v5, step_size, start_hints=None):
     if is_v5:
         sig_size = 0x210
     else:
         sig_size = 0x110
+
+    if start_hints is None:
+        start_hints = {}
 
     last_end = 0
     blocks = []
@@ -157,17 +189,31 @@ def find_blocks_by_sigs(data, sigs, pub_keys, is_v5, step_size):
         target_key = pub_keys[var]
         verified_start = None
         digest_cleared = False
-        c = offset & ~(step_size - 1)
-        while c >= last_end:
-            data_slice = data[c:end]
+
+        for hinted_start in start_hints.get(end, ()):
+            if hinted_start < last_end or hinted_start > offset:
+                continue
+            data_slice = data[hinted_start:end]
             if is_good_sig(data_slice, target_key, is_v5, False):
-                verified_start = c
+                verified_start = hinted_start
                 break
             if is_good_sig(data_slice, target_key, is_v5, True):
-                verified_start = c
+                verified_start = hinted_start
                 digest_cleared = True
                 break
-            c -= step_size
+
+        if verified_start is None:
+            c = offset & ~(step_size - 1)
+            while c >= last_end:
+                data_slice = data[c:end]
+                if is_good_sig(data_slice, target_key, is_v5, False):
+                    verified_start = c
+                    break
+                if is_good_sig(data_slice, target_key, is_v5, True):
+                    verified_start = c
+                    digest_cleared = True
+                    break
+                c -= step_size
         if verified_start is None:
             failed.append((offset, var))
             continue
@@ -188,15 +234,15 @@ def split_file_by_sigs(
     is_v5,
     step_size,
     custom_names=(),
+    start_hints=None,
 ):
     blocks, failed = find_blocks_by_sigs(
-        data, sigs, pub_keys, is_v5, step_size
+        data, sigs, pub_keys, is_v5, step_size, start_hints
     )
-
     expected_count = len(custom_names)
     if failed and expected_count and len(blocks) < expected_count and step_size > 0x8:
         fine_blocks, fine_failed = find_blocks_by_sigs(
-            data, sigs, pub_keys, is_v5, 0x8
+            data, sigs, pub_keys, is_v5, 0x8, start_hints
         )
         if abs(len(fine_blocks) - expected_count) < abs(len(blocks) - expected_count):
             blocks = fine_blocks
@@ -223,6 +269,39 @@ def split_file_by_sigs(
         for offset, _ in failed:
             print(f"{output_dir}: failed to find start for {offset + sig_size}")
 
+def looks_like_pss(signature, modulus, exponent):
+    value = int.from_bytes(signature, "little")
+    if value >= modulus:
+        return False
+    encoded = pow(value, exponent, modulus).to_bytes(0x100, "big")
+    if encoded[-1] != 0xBC:
+        return False
+    masked_db = encoded[:223]
+    h_value = encoded[223:255]
+    unused_bits = 0x100 * 8 - (modulus.bit_length() - 1)
+    if unused_bits and masked_db[0] >> (8 - unused_bits):
+        return False
+    mask = bytearray()
+    for counter in range((len(masked_db) + 31) // 32):
+        mask.extend(hashlib.sha256(h_value + counter.to_bytes(4, "big")).digest())
+    db = bytearray(a ^ b for a, b in zip(masked_db, mask))
+    if unused_bits:
+        db[0] &= 0xFF >> unused_bits
+    delimiter = len(db) - 32 - 1
+    return not any(db[:delimiter]) and db[delimiter] == 1
+
+def filter_v4_pss_candidates(data, sigs, public_key):
+    numbers = public_key.public_numbers()
+    valid = []
+    for footer_offset, key_type in sigs:
+        signature_offset = footer_offset + 0x10
+        signature = bytes(data[
+            signature_offset:signature_offset + 0x100
+        ])
+        if looks_like_pss(signature, numbers.n, numbers.e):
+            valid.append((footer_offset, key_type))
+    return valid
+
 def split_file_wrapper(data, sboot_split_names, output_dir, footer):
     if footer.codesigner_version == 5:
         pub_keys = [load_public_key(footer.st2_key_tee, footer.codesigner_version == 5), load_public_key(footer.st2_key_ree, footer.codesigner_version == 5)]
@@ -236,13 +315,14 @@ def split_file_wrapper(data, sboot_split_names, output_dir, footer):
         sig_meme = sboot[offset_sig_meme : offset_sig_meme + 8].tobytes()
     else:
         offset_sig_meme = size_no_avb - 0x110
-        sig_meme = sboot[offset_sig_meme : offset_sig_meme + 16].tobytes()
+        sig_meme = sboot[offset_sig_meme : offset_sig_meme + 12].tobytes()
     
     sigs = find_st2(sboot, offset_sig_meme, sig_meme, footer.codesigner_version == 5)
-    # crc is nulled here on 9810 bl31 sig, idk why. TODO: find it without hack
-    v = int.from_bytes(bytes(footer.soc_info[0:4]), "little")
-    if v == 622849:
-        sigs = [[0x14EF0, 0]] + sigs
+    if footer.codesigner_version == 4:
+        sigs = filter_v4_pss_candidates(sboot, sigs, pub_keys[0])
+
+    start_hints = get_toc_start_hints(sboot) if footer.codesigner_version == 4 else None
+
     split_file_by_sigs(
         output_dir,
         sboot,
@@ -251,6 +331,7 @@ def split_file_wrapper(data, sboot_split_names, output_dir, footer):
         footer.codesigner_version == 5,
         0x1000,
         sboot_split_names,
+        start_hints,
     )
 
 def process_image(img, indir, outdir, footer):
