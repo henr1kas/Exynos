@@ -52,6 +52,22 @@ def write_words(data, offset, words):
 def jump_to_func_from(from_addr, to_addr):
     return 0x94000000 | (((to_addr - from_addr) >> 2) & 0x03FFFFFF)
 
+def patch_initialize_efuse_data(data): # these patches should be moved to el3_mon?
+    nantirbk = find_xref(data, b"nantirbk0 mismatch!(%d vs %d), updating...\n\0")
+    print(f"nantirbk: {nantirbk:#x}")
+    write_u32(data, nantirbk - 0x80, 0x52800000) # etc_market 0
+    write_u32(data, nantirbk - 0x70, 0x52800020) # etc_development 1
+    write_u32(data, nantirbk - 0x40, 0x52800000) # commercial_bit 0
+    write_u32(data, nantirbk - 0x30, 0x52800020) # test_bit 1
+    write_u32(data, nantirbk - 0x20, 0x52800000) # warranty_bit 0
+
+def patch_set_warranty_void_bit_reason(data):
+    set_warranty_void_bit_reason = find_xref(data, b"%s : no reason\n\0") + 0x18
+    print(f"set_warranty_void_bit_reason: {set_warranty_void_bit_reason:#x}")
+    data[set_warranty_void_bit_reason : set_warranty_void_bit_reason + len(RETURN_ZERO)] = RETURN_ZERO
+
+# TODO: inspect "Forced Enable KAP" fuses, enable uart 619k spoof
+
 def get_efuse_data():
     import hmac
     from sign import load_private_key, pubkey_blob
@@ -91,12 +107,14 @@ def patch_fuse_boot_key(data):
     payload.extend(struct.unpack("<8I", get_efuse_data()))
     write_words(data, odin_useless_func, payload)
 
-should_fuse_key = True # Burns BOOT_KEY once after UFS boot into ODIN MODE.
+should_fuse_key = False # Burns BOOT_KEY once after UFS boot into ODIN MODE.
 
 if __name__ == "__main__":
     with open(sys.argv[1], "rb") as f:
         data = bytearray(f.read())
 
+    patch_initialize_efuse_data(data)
+    patch_set_warranty_void_bit_reason(data)
     if should_fuse_key:
         patch_fuse_boot_key(data)
 
