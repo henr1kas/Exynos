@@ -4,7 +4,8 @@ This repository can split, patch, and resign bootloader images for some
 Exynos SoC's.
 
 Sample usage guide for each SoC to patch and resign images below
-Check which files to put to `input` folder from scripts/s5e*.py 
+
+Check which files to put to `input` folder from `scripts/s5e*.py`
 
 ## S5E8890
 
@@ -54,9 +55,12 @@ python scripts/build.py s5e9840 keys output
 
 Houston payload example:
 
+currently 9840_boot_custom_key.bin must be embedded into the bl1
+
+change Houston to exec 0x02024000
+
 ```bash
-python houston-pub/houston.py -e -p payloads/9840_boot_custom_key.bin \
-  output/sboot/bl1.bin \
+python houston-pub/houston.py -e -p output/sboot/bl1.bin \
   output/sboot/epbl.bin \
   output/sboot/bl2.bin \
   output/sboot/bootload.bin \
