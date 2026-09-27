@@ -1,102 +1,90 @@
-# Custom Key Boot & Fusing Guide
+# Custom key bootloader guide
 
-This guide walks through building a custom-signed bootloader, fusing a custom `SEC_BOOT_KEY` on Exynos9810.
+This repository can split, patch, and resign bootloader images for some
+Exynos SoC's.
 
-## Prerequisites
+Sample usage guide for each SoC to patch and resign images below
+Check which files to put to `input` folder from scripts/s5e*.py 
 
-- `cm.bin`, `keystorage.bin`, `sboot.bin` extracted from stock `BL.tar`
-- Python3
-- [houston-pub](https://github.com/halal-beef/houston-pub)
-- ODIN (for flashing)
-
-## 1. Prepare Files
-
-Copy the following files from `BL.tar` into the `bl/` directory:
-
-```
-bl/cm.bin
-bl/keystorage.bin
-bl/sboot.bin
-```
-
-## 2. Split `sboot.bin`
+## S5E8890
 
 ```bash
-python scripts/split.py bl/sboot.bin sboot
+python scripts/split.py s5e8890 input output
+python scripts/patch_8890.py output/sboot/u-boot.bin
+python scripts/build.py s5e8890 keys output
 ```
 
-This extracts the individual components of `sboot.bin` into a working `sboot/` directory.
-
-## 3. Patch `u-boot.bin`
-
-Run the patch script:
+Houston payload example:
 
 ```bash
-python scripts/patch.py sboot/u-boot.bin
+python houston-pub/houston.py -e -p payloads/8890_boot_custom_key.bin \
+  output/sboot/fwbl1.bin \
+  output/sboot/bl31.bin \
+  output/sboot/bl2.bin \
+  output/sboot/u-boot.bin
 ```
 
-**Optional — enable key fusing:**
-If you want the patched `sboot.bin` to fuse a custom `SEC_BOOT_KEY` when it later boots from UFS and enters download mode, open `patch.py` *before* running it and set:
-
-```python
-should_fuse_key = True
-```
-
-If you don't want fusing to happen, leave this flag untouched (default) and simply run `patch.py` as-is.
-
-> ⚠️ **Warning:** Fusing `SEC_BOOT_KEY` is a **one-way, irreversible operation**. Once fused, the device will permanently require boot images signed with your custom key, and this cannot be undone. Only set `should_fuse_key = True` if you fully understand the implications and have verified your setup on a device you are prepared to lose if something goes wrong.
-
-## 4. Build the Signed `sboot.bin`
+## S5E9810
 
 ```bash
-python scripts/build.py keys sboot bl [rb_count]
+python scripts/split.py s5e9810 input output
+python scripts/patch_9810.py output/sboot/u-boot.bin
+python scripts/build.py s5e9810 keys output
 ```
 
-This re-signs the files in `bl/` and the `sboot/` components, and produces a new, properly signed `sboot.bin`.
-
-`rb_count` is optional. If provided, it overrides the rollback counter in the signed images. If omitted, the existing rollback counter value is preserved.
-
-## 5. Boot with the Custom Key
-
-Use `houston.py` to boot the payload with the custom-key boot binary:
+Houston payload example:
 
 ```bash
-python houston-pub/houston.py -e -p boot_custom_key.bin \
-  sboot/fwbl1.bin \
-  sboot/bl31.bin \
-  sboot/bl2.bin \
-  sboot/fwbl1.bin \
-  sboot/u-boot.bin \
-  sboot/el3_mon.bin
+python houston-pub/houston.py -e -p payloads/9810_boot_custom_key.bin \
+  output/sboot/fwbl1.bin \
+  output/sboot/bl31.bin \
+  output/sboot/bl2.bin \
+  output/sboot/fwbl1.bin \
+  output/sboot/u-boot.bin \
+  output/sboot/el3_mon.bin
 ```
 
-## 6. Flash via ODIN
-
-Pack the updated contents of `bl/` into a `.tar` archive and flash it using ODIN.
-
-## 7. Boot from UFS
-
-After flashing, the same payload will attempt to boot from UFS.
-
-> **Note:** This step is not 100% reliable and currently only works on Linux.
-
-Repeat the boot command:
+## S5E9840
 
 ```bash
-python houston-pub/houston.py -e -p boot_custom_key.bin \
-  sboot/fwbl1.bin \
-  sboot/bl31.bin \
-  sboot/bl2.bin \
-  sboot/fwbl1.bin \
-  sboot/u-boot.bin \
-  sboot/el3_mon.bin
+python scripts/split.py s5e9840 input output
+python scripts/patch_9840.py output/sboot/bootload.bin
+python scripts/build.py s5e9840 keys output
 ```
 
-Then try to enter download mode/hold power for boot. If `should_fuse_key` was set in step 3, `SEC_BOOT_KEY` will be fused at this point.
+Houston payload example:
 
----
+```bash
+python houston-pub/houston.py -e -p payloads/9840_boot_custom_key.bin \
+  output/sboot/bl1.bin \
+  output/sboot/epbl.bin \
+  output/sboot/bl2.bin \
+  output/sboot/bootload.bin \
+  output/sboot/el3_mon.bin \
+  output/ldfw/ldfw.bin \
+  output/tzsw/tzsw.bin
+```
+
+## S5E9945
+
+```bash
+python scripts/split.py s5e9945 input output
+python scripts/patch_9945.py keys output
+python scripts/build.py s5e9945 keys output
+```
+
+Not supported by Houston currently.
+
+### Optional key fusing
+
+The patch scripts default to `should_fuse_key = False`. To include the key fusing
+patch, set it to `True` in the **matching** `scripts/patch_*.py` file before
+running the patch command. The patched bootloader attempts to burn a
+free slot for secure boot key after it boots download mode from UFS payload.
+
+**Warning:** Fusing a custom secure boot key is irreversible.
+The device will permanently require images signed with the custom key.
 
 ## Resources
 
-- [houston-pub](https://github.com/halal-beef/houston-pub) — CVE-2024-56426 implementation
-- [CVE-2024-56426 payload reference (SM-G960F)](https://github.com/Creeeeger/CVE-2024-56426/blob/SM-G960F/external/payloads/exynos9820_boot_custom_key/Exynos9820_boot_custom_key.S) — Exynos9810 boot custom key payload
+- [houston-pub](https://github.com/halal-beef/houston-pub)
