@@ -39,6 +39,7 @@ def soc_data():
                 Image("tail.bin", stage=None), # signerv3+avb
             )),
             Image("uh.bin", ree=True),
-            Image("up_param.bin", stage=None)
+            Image("up_param.bin", stage=None),
+            Image("B0S_EUR_OPENX.pit", ree=True), # TODO: device specific (take any .pit?)
         )
     )
